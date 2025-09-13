@@ -20,21 +20,17 @@ My list of suffering along the way
 - [Swap chain creation](#swap-chain-creation)
 - [Swap chain recreation](#swap-chain-recreation)
 
----
-
 ## Window creation
 
 Creating window is as simple as calling GLFW init function, but this window creation will not be displayed by Hyprland if it has no display content (empty draw buffer), which mean this GLFW window is exist but hidden by Hyprland
 
 I acknowledge this issues after I tried to draw GLFW window with OpenGL and the window is shown by the compositor
 
----
-
 ## Wayland support
 
 As I tried to use native support of Wayland in Vulkan as I know that extension exist in my GPU but I quickly found out that extension is disabled on `vulkaninfo`
 
-```
+```text
 VK_KHR_wayland_surface: extension revision 6
 GPU id : 0 (NVIDIA GeForce GTX 1060 6GB) [VK_KHR_wayland_surface]:
   Surface type = VK_KHR_wayland_surface
@@ -44,8 +40,6 @@ GPU id : 0 (NVIDIA GeForce GTX 1060 6GB) [VK_KHR_wayland_surface]:
 Why it is disabled? I cannot tell myself, It might be because of my NVIDIA proprietary driver (ver. 580) or Hyprland simply said "No"
 
 Therefore moving foward I will be using X11 running under XWayland
-
----
 
 ## Swap chain creation
 
