@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstdio>
 #define VK_USE_PLATFORM_XLIB_KHR
 #include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
@@ -14,9 +15,10 @@
 #include <optional>
 #include <set>
 #include <cstdint> // Necessary for uint32_t
-#include <limits> // Necessary for std::numeric_limits
-#include <algorithm> // Necessary for std::clamp
 #include <fstream> // Necessary for loading shaders
+// Below include are currently unused
+#include <limits> // Necessary for std::numeric_limits -> chooseSwapExtent()
+#include <algorithm> // Necessary for std::clamp -> chooseSwapExtent()
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -404,6 +406,9 @@ private:
 	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
 		SwapChainSupportDetails details;
 
+		// How come I forget this query build
+		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
+
 		uint32_t formatCount;
 		vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
 
@@ -449,14 +454,20 @@ private:
 
 	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
 		// Resolution of the swap chain images and it's almost always exactly equal to the resolution of the window that we're drawing to in pixels 
+		// Why almost equal? Sometimes this is overwritten by zoom scaling on system and such
 
-		// This is a hack fallback for Wayland/XWayland because of Hyprland quirk of not posting empty window
-		VkExtent2D native_extent = {
-				WIDTH,
-				HEIGHT
-		};
-		return native_extent;
+		// This is a hack for Wayland/XWayland because of Hyprland quirk of not posting giving actual window sizes
+		//int width, height;
+		//glfwGetFramebufferSize(window, &width, &height);
 
+		//VkExtent2D native_extent = {
+				//.width = static_cast<uint32_t>(width),
+				//.height = static_cast<uint32_t>(height),
+		//};
+
+		//return native_extent;
+
+		// This is going to give garbages value for window sizes in XWayland from the Vulkan window calls
 		if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
 			return capabilities.currentExtent;
     } else {
@@ -481,15 +492,10 @@ private:
     VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
     VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
     VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
-	
+
 		uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1; // Request to have at least +1 additional image in the swap chain
 		if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
 			imageCount = swapChainSupport.capabilities.maxImageCount;
-		}
-
-		// Fallback if maxImageCount is zero or invalid for Wayland/XWayland
-		if (imageCount == 0 || imageCount > 8) {
-			imageCount = 2;
 		}
 
 		VkSwapchainCreateInfoKHR createInfo {
@@ -1015,8 +1021,8 @@ private:
 		return VK_FALSE;
 	}
 
-	// Last page: https://vulkan-tutorial.com/en/Drawing_a_triangle/Swap_chain_recreation
 	// Total hour learning Vulkan: 11h
+	// Last page: https://vulkan-tutorial.com/en/Drawing_a_triangle/Swap_chain_recreation
 	void mainLoop() {
 		while (!glfwWindowShouldClose(window)) {
 			glfwPollEvents();
