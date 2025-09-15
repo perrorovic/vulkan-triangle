@@ -6,6 +6,8 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include <glm/glm.hpp> // For building vertex data
+
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
@@ -20,7 +22,8 @@
 // Below include are currently unused
 #include <limits> // Necessary for std::numeric_limits -> chooseSwapExtent()
 #include <algorithm> // Necessary for std::clamp -> chooseSwapExtent()
-#include <chrono> 
+#include <chrono> // For timestamps
+#include <array> // Static array for vertex template
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -95,6 +98,45 @@ static std::string getTimestamp() {
 	return std::to_string(timestamp);
 };
 
+struct Vertex {
+	glm::vec2 pos;
+	glm::vec3 color;
+
+	static VkVertexInputBindingDescription getBindingDescription() {
+		VkVertexInputBindingDescription bindingDescription{
+			.binding = 0,
+			.stride = sizeof(Vertex),
+			.inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+			// VK_VERTEX_INPUT_RATE_VERTEX: Move to the next data entry after each vertex
+			// VK_VERTEX_INPUT_RATE_INSTANCE: Move to the next data entry after each instance
+		};
+		return bindingDescription;
+	};
+
+	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+
+		attributeDescriptions[0].binding = 0;
+		attributeDescriptions[0].location = 0;
+		attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+		attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+		attributeDescriptions[1].binding = 0;
+		attributeDescriptions[1].location = 1;
+		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+		attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+    return attributeDescriptions;
+	}
+};
+
+// Predetermine vert data for creating the triangle
+const std::vector<Vertex> vertices = {
+	{{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
+	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+};
+
 class VulkanMainDevelopment {
 
 public:
@@ -128,6 +170,9 @@ private:
 	VkRenderPass renderPass;
 	VkPipelineLayout pipelineLayout;
 	VkPipeline graphicsPipeline;
+
+	VkBuffer vertexBuffer;
+	VkDeviceMemory vertexBufferMemory;
 
 	VkCommandPool commandPool;
 	std::vector<VkCommandBuffer> commandBuffers;
@@ -197,6 +242,7 @@ private:
 		createGraphicsPipeline();
 		createFramebuffer();
 		createCommandPool();
+		createVertexBuffer();
 		createCommandBuffer();
 		createSyncObjects();
 	}
@@ -688,12 +734,15 @@ private:
 		VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
 		// Vertex input
+		auto bindingDescription = Vertex::getBindingDescription();
+		auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo {
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-			.vertexBindingDescriptionCount = 0,
-			.pVertexBindingDescriptions = nullptr, // Optional
-			.vertexAttributeDescriptionCount = 0,
-			.pVertexAttributeDescriptions = nullptr, // Optional
+			.vertexBindingDescriptionCount = 1,
+			.pVertexBindingDescriptions = &bindingDescription,
+			.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
+			.pVertexAttributeDescriptions = attributeDescriptions.data(),
 		};
 
 		// Input assembly
@@ -873,6 +922,59 @@ private:
 		}
 	}
 
+	void createVertexBuffer() {
+		VkBufferCreateInfo bufferInfo {
+			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+			.size = sizeof(vertices[0]) * vertices.size(), // This is the const verticles
+			.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		};
+	
+		// Buffers can also be owned by a specific queue family or be shared between multiple at the same time
+		// The buffer will only be used from the graphics queue, so we can stick to exclusive access
+
+    if (vkCreateBuffer(device, &bufferInfo, nullptr, &vertexBuffer) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create vertex buffer!");
+    }
+
+		// Setting the buffer into memory
+		VkMemoryRequirements memRequirements;
+		vkGetBufferMemoryRequirements(device, vertexBuffer, &memRequirements);
+
+		VkMemoryAllocateInfo allocInfo { // Allocate data into memory
+			.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+			.allocationSize = memRequirements.size,
+			.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+		};
+
+		if (vkAllocateMemory(device, &allocInfo, nullptr, &vertexBufferMemory) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to allocate vertex buffer memory!");
+		}
+
+		vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0);
+		
+		void* data; // This data is filled by vkMapMemory()
+		vkMapMemory(device, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+		memcpy(data, vertices.data(), (size_t) bufferInfo.size);
+		vkUnmapMemory(device, vertexBufferMemory);
+	}
+
+	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+		// The VkPhysicalDeviceMemoryProperties structure has two arrays memoryTypes and memoryHeaps 
+		// Memory heaps are distinct memory resources like dedicated VRAM and swap space in RAM for when VRAM runs out 
+		// The different types of memory exist within these heaps
+		VkPhysicalDeviceMemoryProperties memProperties;
+		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+		
+		for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+			// Find suitable memory placement and write the vertex data into memory
+			if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+        return i;
+			}
+		}
+		throw std::runtime_error("Failed to find suitable memory type!");
+	}
+
 	void createCommandBuffer() {
 		commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
@@ -938,7 +1040,11 @@ private:
 			};
 			vkCmdSetScissor(commandBuffer, 0, 1, &scissor);            
 
-			vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+			VkBuffer vertexBuffers[] = {vertexBuffer};
+			VkDeviceSize offset[] = {0};
+			vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offset);
+
+			vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffer);
 
@@ -1038,8 +1144,8 @@ private:
 		return VK_FALSE;
 	}
 
-	// Total hour learning Vulkan: 11h
-	// Last page: https://vulkan-tutorial.com/en/Drawing_a_triangle/Swap_chain_recreation
+	// Total hour learning Vulkan: 13h
+	// Last page: https://vulkan-tutorial.com/en/Vertex_buffers/Staging_buffer
 	void mainLoop() {
 		while (!glfwWindowShouldClose(window)) {
 			glfwPollEvents();
@@ -1156,6 +1262,9 @@ private:
 	void cleanup() {
 		std::cerr << "Cleaning up..." << std::endl;
 		cleanupSwapChain();
+
+		vkDestroyBuffer(device, vertexBuffer, nullptr);
+		vkFreeMemory(device, vertexBufferMemory, nullptr);
 
 		vkDestroyPipeline(device, graphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);

@@ -2,8 +2,11 @@
 
 Rite of pasage of learing Vulkan API, following along with [Vulkan Tutorial](https://vulkan-tutorial.com)
 
-![Vulkan Triangle](markdown/66jJRSG.png)
-Hours spent on this project: 11h (and counting...)
+|Triangle A | Triangle B|
+|:-:|:-:|
+|![Vulkan Triangle Hardcoded Vert and Color](markdown/66jJRSG.png) | ![Vulkan Triangle](markdown/pYuq7IM.png)|
+
+Hours spent on this project: 13h (and counting...)
 
 ## Overview
 
@@ -69,7 +72,7 @@ Also minimization is something that I am unable to do on Hyprland, so I am creat
 
 - Run the Vulkan application
 - Switch to different workspace
-- After a while go back to the Vulkan application workspace and checks for inconsistency in the timestamp logs
+- After a while go back to the Vulkan application and checks for inconsistency
 
 Below are the timestamp logs:
 
@@ -82,4 +85,4 @@ Current frame: 232 [1757905360151]
 Current frame: 233 [1757905361152]
 ```
 
-But yet again this is not total minimization, and it still rendering the application at lower speed update
+But yet again this is not total minimization, and it still rendering the application at lower update speed
