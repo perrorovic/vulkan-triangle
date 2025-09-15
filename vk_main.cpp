@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #define VK_USE_PLATFORM_XLIB_KHR
 #include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
@@ -19,6 +20,7 @@
 // Below include are currently unused
 #include <limits> // Necessary for std::numeric_limits -> chooseSwapExtent()
 #include <algorithm> // Necessary for std::clamp -> chooseSwapExtent()
+#include <chrono> 
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -26,11 +28,11 @@ const uint32_t WIDTH = 640;
 const uint32_t HEIGHT = 480;
 
 const std::vector<const char*> validationLayers = {
-    "VK_LAYER_KHRONOS_validation"
+	"VK_LAYER_KHRONOS_validation"
 };
 
 const std::vector<const char*> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+	VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
 static std::vector<char> readFile(const std::string& filename) {
@@ -87,6 +89,12 @@ struct SwapChainSupportDetails {
 	std::vector<VkPresentModeKHR> presentModes;
 };
 
+static std::string getTimestamp() {
+	auto clock = std::chrono::system_clock::now();
+	auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(clock.time_since_epoch()).count();
+	return std::to_string(timestamp);
+};
+
 class VulkanMainDevelopment {
 
 public:
@@ -127,6 +135,8 @@ private:
 	std::vector<VkSemaphore> imageAvailableSemaphores;
 	std::vector<VkSemaphore> renderFinishedSemaphores;
 	std::vector<VkFence> inFlightFences;
+	
+	bool framebufferResized = false;
 
 	uint32_t currentFrame = 0;
 	uint32_t elapsedFrame = 0;
@@ -142,16 +152,17 @@ private:
 			glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
 			glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+			window = glfwCreateWindow(WIDTH, HEIGHT, "OpenGL", nullptr, nullptr);
 		} else {
 			glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+			window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
 		}
 
-		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-
-		window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
-
-		glfwShowWindow(window);
-		glfwPollEvents();
+		// Resize data already being set by Hyprland now we finally have some W on this compositor
+		// But of course it didn't recreate a proper images size based on the new window resolution like limit width/height so the triangle keep its aspect ratio
+		// glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+		glfwSetWindowUserPointer(window, this);
+		glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 
 		if (withOpenGL) {
 			if (!window) {
@@ -166,6 +177,12 @@ private:
 		} else {
 			std::cerr << "Creating GLFW window with Vulkan, Hyprland will ignore empty window!" << std::endl;
 		}
+	}
+
+	static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+		// Creating static function as callback because GLFW does not know how to properly call a member function with pointer to application instance
+		auto application = reinterpret_cast<VulkanMainDevelopment*>(glfwGetWindowUserPointer(window));
+		application->framebufferResized = true;
 	}
 
 	void initVulkan() {
@@ -1027,8 +1044,6 @@ private:
 		while (!glfwWindowShouldClose(window)) {
 			glfwPollEvents();
 			drawFrame();
-			currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
-			std::cerr << "Current frame: " << elapsedFrame++ << std::endl;
 		}
 		vkDeviceWaitIdle(device);
 	}
@@ -1039,10 +1054,22 @@ private:
     // Present that image to the screen for presentation, returning it to the swapchain
 
 		vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-		vkResetFences(device, 1, &inFlightFences[currentFrame]);
 	
     uint32_t imageIndex;
-    vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+		// Out of date swap chain command
+		VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+		// Check for framebuffer sizes, create new swap chain images if there is changes to it
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+			framebufferResized = false;
+			recreateSwapChain();
+			return;
+		} else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+			throw std::runtime_error("Failed to acquire swap chain image!");
+		}
+
+		// Only reset if we submit new images
+		vkResetFences(device, 1, &inFlightFences[currentFrame]);
 	
 		// Recording the command buffer
 		vkResetCommandBuffer(commandBuffers[currentFrame], 0);
@@ -1083,26 +1110,65 @@ private:
 		presentInfo.pImageIndices = &imageIndex;
 		presentInfo.pResults = nullptr; // Optional
 	
-		vkQueuePresentKHR(presentQueue, &presentInfo);
+		result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+			recreateSwapChain();
+		} else if (result != VK_SUCCESS) {
+			throw std::runtime_error("failed to present swap chain image!");
+		}
+
+		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+		std::cerr << "Current frame: " << elapsedFrame++ << std::endl;
 	}
 
-	void cleanup() {
-		std::cerr << "Cleaning up..." << std::endl;
+	void recreateSwapChain() {
+		// Check for window minimization
+		int width = 0, height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+    while (width == 0 || height == 0) {
+			glfwGetFramebufferSize(window, &width, &height);
+			std::cerr << "Window is currently minimized" << std::endl;
+			glfwWaitEvents();
+    }
 
-		vkDestroyCommandPool(device, commandPool, nullptr);
+		vkDeviceWaitIdle(device);
 
+		cleanupSwapChain();
+
+		createSwapChain();
+		createImageViews();
+		createFramebuffer();
+	}
+
+	void cleanupSwapChain() {
 		for (auto framebuffer : swapChainFramebuffers) {
 			vkDestroyFramebuffer(device, framebuffer, nullptr);
 		}
 
+		for (auto imageView : swapChainImageViews) {
+			vkDestroyImageView(device, imageView, nullptr);
+		}
+
+		vkDestroySwapchainKHR(device, swapChain, nullptr);
+	}
+
+	void cleanup() {
+		std::cerr << "Cleaning up..." << std::endl;
+		cleanupSwapChain();
+
 		vkDestroyPipeline(device, graphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+
 		vkDestroyRenderPass(device, renderPass, nullptr);
 
-    for (auto imageView : swapChainImageViews) {
-			vkDestroyImageView(device, imageView, nullptr);
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+			vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+			vkDestroyFence(device, inFlightFences[i], nullptr);
     }
-		vkDestroySwapchainKHR(device, swapChain, nullptr);
+
+		vkDestroyCommandPool(device, commandPool, nullptr);
 		vkDestroyDevice(device, nullptr); // Logical devices don't interact directly with instances, which is why it's not included as a parameter.
 
 		if (enableValidationLayers) {
@@ -1111,12 +1177,6 @@ private:
 
 		vkDestroySurfaceKHR(instance, surface, nullptr);
 		vkDestroyInstance(instance, nullptr);
-
-		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-			vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
-			vkDestroyFence(device, inFlightFences[i], nullptr);
-		}
 
 		glfwDestroyWindow(window);
 		glfwTerminate();
