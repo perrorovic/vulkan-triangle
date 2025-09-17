@@ -1,17 +1,20 @@
-CFLAGS = -std=c++17 -O2
+# If clangd unable to read this file properly, just compile the commands with "bear -- make"
+VULKAN_SDK_PATH = include/vulkansdk/1.4.321.1/x86_64
+STB_INCLUDE_PATH = include/stb
+
+CFLAGS = -std=c++17 -I$(STB_INCLUDE_PATH)
 LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi
 
-vk_extension: vk_ext.cpp
-	g++ $(CFLAGS) -o vk_extension vk_ext.cpp $(LDFLAGS)
+SOURCE = source
+BUILD = build
 
-run_vk_extension: vk_extension
-	./vk_extension
+PHONY = build, run, clean
 
-vk_main: vk_main.cpp
-	g++ $(CFLAGS) -o vk_main vk_main.cpp $(LDFLAGS)
+compile: $(SOURCE)/vk_main.cpp
+	clang++ $(CFLAGS) -o $(BUILD)/vk_main.x86_64 $(SOURCE)/vk_main.cpp $(LDFLAGS)
 
-run: vk_main
-	XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 GLFW_PLATFORM=x11 ./vk_main
+run: compile
+	XDG_SESSION_TYPE=x11 GDK_BACKEND=x11 GLFW_PLATFORM=x11 ./$(BUILD)/vk_main.x86_64
 
 clean:
-	rm -f vk_main vk_extension
+	rm -f build/*

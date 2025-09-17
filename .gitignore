@@ -1,1 +1,4 @@
-1.4.321.1
+.cache
+build/*
+include/vulkansdk/1.4.321.1
+compile_commands.json
